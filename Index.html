@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Play Maxcraft - A Web Minecraft 1.12.2 Client" />
+  <title>Maxcraft</title>
+  <link rel="icon" href="favicon.ico" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background-color: black;
+      color: white;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #status, #progress, #buttons {
+      margin-top: 1em;
+    }
+    #status {
+      font-size: 1.2em;
+    }
+    #game_frame {
+      width: 100vw;
+      height: 100vh;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Welcome to Maxcraft</h1>
+  <div id="status">Initializing Maxcraft...</div>
+  <progress id="progress" max="1" value="0" style="width: 60%;"></progress>
+  <div id="buttons" style="display: none;">
+    <button id="cancel">Cancel</button>
+    <button id="retry">Retry</button>
+  </div>
+
+  <iframe id="game_frame" style="display: none;"></iframe>
+
+  <script>
+    const clientOptions = {
+      name: 'Maxcraft',
+      servers: [],
+      assetUrl: "https://gateway.ipfs.io/ipfs/Qmcj5HbPqxewbrSR8ULY3SmPt9niQfQboYYDqa9Ko41hZR", // example IPFS hash
+      fileName: "index.bin.gz"
+    };
+
+    const gateways = [
+      "https://gateway.ipfs.io/ipfs/",
+      "https://cloudflare-ipfs.com/ipfs/",
+      "https://ipfs.io/ipfs/"
+    ];
+
+    const status = document.getElementById("status");
+    const progress = document.getElementById("progress");
+    const buttons = document.getElementById("buttons");
+    const cancelButton = document.getElementById("cancel");
+    const retryButton = document.getElementById("retry");
+    const gameFrame = document.getElementById("game_frame");
+
+    let controller = null;
+    let aborted = false;
+
+    function updateStatus(text) {
+      status.textContent = text;
+    }
+
+    async function loadMaxcraft() {
+      aborted = false;
+      buttons.style.display = "none";
+      progress.value = 0;
+      updateStatus("Connecting to Maxcraft...");
+
+      for (let gateway of gateways) {
+        const url = `${gateway}${clientOptions.assetUrl}/${clientOptions.fileName}`;
+        updateStatus(`Attempting to load from: ${url}`);
+
+        try {
+          controller = new AbortController();
+          const response = await fetch(url, {
+            signal: controller.signal
+          });
+
+          if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+          const contentLength = response.headers.get('Content-Length');
+          const total = contentLength ? parseInt(contentLength) : null;
+          const reader = response.body.getReader();
+
+          const stream = new DecompressionStream('gzip');
+          const decompressed = response.body.pipeThrough(stream);
+
+          const chunks = [];
+          let received = 0;
+
+          const decompressedReader = decompressed.getReader();
+
+          while (true) {
+            const { done, value } = await decompressedReader.read();
+            if (done) break;
+            chunks.push(value);
+            received += value.length;
+            if (total) {
+              progress.value = received / total;
+            }
+          }
+
+          updateStatus("Launching Maxcraft...");
+          const blob = new Blob(chunks, { type: "application/javascript" });
+          const objectURL = URL.createObjectURL(blob);
+          gameFrame.src = objectURL;
+          gameFrame.style.display = "block";
+          status.style.display = "none";
+          progress.style.display = "none";
+          return;
+
+        } catch (e) {
+          if (aborted) return;
+          console.error(`Failed to load from ${gateway}`, e);
+        }
+      }
+
+      updateStatus("Failed to load Maxcraft. Please try again.");
+      buttons.style.display = "block";
+    }
+
+    cancelButton.addEventListener("click", () => {
+      aborted = true;
+      if (controller) controller.abort();
+      updateStatus("Cancelled.");
+      buttons.style.display = "none";
+    });
+
+    retryButton.addEventListener("click", () => {
+      loadMaxcraft();
+    });
+
+    window.addEventListener("load", () => {
+      loadMaxcraft();
+    });
+  </script>
+</body>
+</html>
